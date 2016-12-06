@@ -1,0 +1,149 @@
+---
+title: "Human and Economic Damages of Natural Disasters"
+author: "Rogelio Caballero"
+date: "December 4, 2016"
+output: html_document
+abstract: "In this document we analyze the human and economic damage of different meteorological phenomena from 1950 to November 2011 in the United States. We calculate the total fatalities + injuries for each event and then we assess the 10 most dangerous phenomena according to this metric. We divided the economic impact into damage on crops and damage on property due to their qualitative differences."
+---
+# Data Processing
+## Imports
+The dataset is a *.csv.bz2* file. We will read it and store it in the variable *storm_data0*. Additionally we will import *dplyr* for its efficiency when dealing with large datasets and *ggplot2* for its elegance.
+```{r caching = TRUE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+
+path <- "/home/rogelio/Desktop/datasciencecoursera/"
+p <- "reproducible_research_final_project"
+
+path <- paste0(path, p)
+
+setwd(path)
+
+storm_data0 <- read.csv("./repdata%2Fdata%2FStormData.csv.bz2")
+```
+Let's take a look at *storm_data0*
+```{r}
+head(storm_data0)
+```
+As we can see there are some columns of *storm_data0* that contain information regarding location, dates and hours of the event. Since we are not interested in that information, we will discard those columns.
+Next, we will split *storm_data0* into one dataframe for human damage *human_dmg* and another dataframe for economic damage *econ_dmg*
+```{r cache=TRUE, message=FALSE}
+human_dmg <- data.frame(evtype = storm_data0$EVTYPE,
+                        fatalities = storm_data0$FATALITIES,
+                        injuries = storm_data0$INJURIES)
+                         
+econ_dmg <- data.frame(evtype = storm_data0$EVTYPE,
+                       propdmg = storm_data0$PROPDMG,
+                       propdmgexp = storm_data0$PROPDMGEXP,
+                       cropdmg = storm_data0$CROPDMG,
+                       cropdmgexp = storm_data0$CROPDMGEXP)
+```
+These datasets contain the exact columns we are interested in. Next, we will add a column to *human_dmg* for the sums of fatalities + injuries for each event. 
+```{r}
+human_dmg <- 
+        mutate(human_dmg, fat_inj = fatalities + injuries)
+```
+Human damages are a very sensitive matter and policy-makers should not make mistakes when dictating civil protection laws. That is why we think that simply adding those variables is better than assigning a weight to each one. "Levels of damage" are difficult to assess, it's better to "overestimate" an injury as a "could-have-been death".
+Columns *propdmgexp* and *cropdmgexp* contain the order of magnitude of the damage (US dollars) with the *thousands* encoded as *K*, the *millions* encoded as *M* and the *billions* encoded as *B*.
+```{r}
+head(econ_dmg$propdmgexp)
+head(econ_dmg$cropdmgexp)
+```
+We will solve this issue by substituting each letter with the literal number value and then transform those columns to numeric type:
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+econ_dmg <- mutate(econ_dmg, 
+                   propdmgexp = gsub("[Hh]", "100", propdmgexp)) %>%
+        mutate(propdmgexp = gsub("[Kk]", "1000", propdmgexp)) %>%
+        mutate(propdmgexp = gsub("[Mm]", "1000000", propdmgexp)) %>%
+        mutate(propdmgexp = gsub("[Bb]", "1000000000", propdmgexp)) %>%
+        mutate(cropdmgexp = gsub("[Hh]", "100", cropdmgexp)) %>%
+        mutate(cropdmgexp = gsub("[Kk]", "1000", cropdmgexp)) %>%
+        mutate(cropdmgexp = gsub("[Mm]", "1000000", cropdmgexp)) %>%
+        mutate(cropdmgexp = gsub("[Bb]", "1000000000", cropdmgexp))
+
+econ_dmg <- 
+        mutate(econ_dmg, propdmgexp = as.numeric(propdmgexp)) %>%
+        mutate(cropdmgexp = as.numeric(cropdmgexp))
+```
+Columns *cropdmg* and *propdmg* contain the significant digits of the damage. To calculate the total damages we need to multiply those significant digits by the orders of magnitude.
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+econ_dmg <- 
+        mutate(econ_dmg, pdmg_total = propdmg * propdmgexp) %>%
+        mutate(cdmg_total = cropdmg * cropdmgexp) %>%
+        mutate(crop_prop = cdmg_total + pdmg_total)
+```
+Columns *pdmg_total*, *cdmg_total*, *crop_prop* will contain the property damage of one particular event, crop damage of one particular event and the combined damage (crop + properties).
+Since we are interested in the damage per 1 event of each type, we will collapse both dataframes by *evtype* taking the mean of all other variables:
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+human_dmg_mean <- 
+        aggregate(.~evtype, human_dmg, FUN = mean)
+
+econ_dmg_mean <- 
+        aggregate(.~evtype, econ_dmg, FUN = mean)
+```
+Finally since we are interested in the most damaging events we will take the 10 types of events that have the highest fatalities + injuries per event.
+# sort events by human damage
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+most_h_dmg <- tail(human_dmg_mean[order(human_dmg_mean$fat_inj),], 
+                   n = 10)
+```
+Since crop damage and property damage are qualitatively different we will take the 10 most destructive events for crops and property by separate.
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+most_econ_dmg_prop <- 
+        tail(econ_dmg_mean[order(econ_dmg_mean$pdmg_total),], 
+                      n = 10)
+
+most_econ_dmg_crop <- 
+        tail(econ_dmg_mean[order(econ_dmg_mean$cdmg_total),], 
+                       n = 10)
+
+most_econ_dmg_sum <- 
+        tail(econ_dmg_mean[order(econ_dmg_mean$crop_prop),], 
+             n = 10)
+```
+# Results
+## Human Damage
+Before plotting the 10 most dangerous events to humans, we need to sort the levels of the factor column *evtype* to see what is the most destructive event more clearly:
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+most_h_dmg$evtype <- factor(most_h_dmg$evtype,
+       levels = most_h_dmg$evtype[order(most_h_dmg$fat_inj)])
+```
+Now we can plot the fatalities + injuries for the most dangerous 10 types of events:
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+ggplot(most_h_dmg, aes(evtype, fat_inj)) + 
+        geom_bar(stat = "identity", fill = "red") + 
+        theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0)) +
+        labs(x = "type of event", y = "fatalities + injuries",
+             title = "Fatalities plus injuries\nper one event of each type") +
+        coord_flip()
+
+```
+
+As we can see the most dangerous event to human health are *heat waves* regardless of how many deaths and injuries compose that statistic. We treat an injury as a potential death.
+## Economic Damage
+Before we use ggplot on economic data we will create a tall and skinny dataframe *econ_data* that will make easier the process of facetting the plot.
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+lab <- rep(c("property", "crops", "property + crops"), each = 10)
+
+econ_data <- 
+        data.frame(evtype = c(as.character(most_econ_dmg_prop$evtype),
+                              as.character(most_econ_dmg_crop$evtype),
+                              as.character(most_econ_dmg_sum$evtype)),
+                   damage = c(most_econ_dmg_prop$pdmg_total,
+                              most_econ_dmg_crop$cdmg_total,
+                              most_econ_dmg_sum$crop_prop),
+                   lab = lab)
+```
+
+Now we will plot damage in US dollars on crops, property and crops + property.
+```{r cache=TRUE, message=FALSE, warning= FALSE}
+ggplot(econ_data, aes(evtype, damage)) + 
+        geom_bar(stat = "identity") + 
+        theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0)) +
+        facet_wrap(~lab, ncol = 3) + 
+        labs(x = "type of event", y = "damage [US dollars]",
+             title = "economic damage\nper one event of each type") +
+        coord_flip()
+```
+
+As we can see, *river floods* cause the most economic damage on crops, while tornadoes with thunderstorm wind and hail cause the greatest damage on property. We can see also that *hurricanes and typhoons* cause a substantial damage both on crops and property.
